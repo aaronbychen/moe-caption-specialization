@@ -1,16 +1,20 @@
 import os
 import torch
 import spacy
+from datasets import load_dataset
 from transformers import T5Tokenizer, T5EncoderModel
 from src.utils.labeling import map_pos_to_category, normalize_t5_piece
 
 
 def main():
-    captions = [
-        "A dog jumps over a log.",
-        "Two children sit at a table.",
-        "A red bus is parked on the street."
-    ]
+    # load a small COCO subset and use the first caption from each example
+    dataset = load_dataset("phiyodr/coco2017", split="train[:50]")
+    captions = []
+    for example in dataset:
+        if "captions" in example and len(example["captions"]) > 0:
+            captions.append(example["captions"][0].strip())
+
+    print(f"Loaded {len(captions)} captions from phiyodr/coco2017.")
 
     # load models
     tokenizer = T5Tokenizer.from_pretrained("t5-small")

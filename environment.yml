@@ -16,3 +16,4 @@ dependencies:
       - transformers
       - sentencepiece
       - spacy
+      - datasets

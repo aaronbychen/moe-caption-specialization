@@ -7,6 +7,8 @@ def main():
     rows = torch.load("artifacts/aligned_token_table.pt")
 
     print(f"Loaded {len(rows)} aligned rows.")
+    print(f"Number of aligned tokens: {len(rows)}")
+    print(f"Number of unique captions: {len(set(row['caption_id'] for row in rows))}")
 
     # category counts
     category_counts = Counter(row["category"] for row in rows)
