@@ -14,3 +14,17 @@ Create the conda environment:
 conda env create -f environment.yml
 conda activate moe-caption
 python -m spacy download en_core_web_sm
+
+## Current Progress
+
+The project currently includes:
+- a T5 smoke test
+- a spaCy-based coarse labeling smoke test
+- an initial token alignment pipeline that builds a word-level token table from captions
+
+## Run
+
+Run the main token-table pipeline from the project root:
+
+```bash
+python -m scripts.build_token_table

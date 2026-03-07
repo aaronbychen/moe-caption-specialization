@@ -20,3 +20,16 @@ def normalize_t5_piece(token_str):
     if token_str == "</s>":
         return ""
     return token_str.replace("▁", "")
+
+def normalize_t5_piece(token_str):
+    """
+    Convert a T5 subword token into a comparable text fragment.
+    Example:
+      '▁dog' -> 'dog'
+      's'    -> 's'
+      '.'    -> '.'
+      '</s>' -> ''
+    """
+    if token_str == "</s>":
+        return ""
+    return token_str.replace("▁", "")
