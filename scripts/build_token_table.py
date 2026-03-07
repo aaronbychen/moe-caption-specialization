@@ -8,7 +8,7 @@ from src.utils.labeling import map_pos_to_category, normalize_t5_piece
 
 def main():
     # load a small COCO subset and use the first caption from each example
-    dataset = load_dataset("phiyodr/coco2017", split="train[:50]")
+    dataset = load_dataset("phiyodr/coco2017", split="train[:500]")
     captions = []
     for example in dataset:
         if "captions" in example and len(example["captions"]) > 0:
@@ -50,10 +50,10 @@ def main():
         t5_tokens = tokenizer.convert_ids_to_tokens(ids)
         t5_vectors = hidden_states[caption_id][:valid_len]
 
-        print("\n" + "=" * 80)
-        print(f"Caption {caption_id}: {caption}")
-        print("spaCy words:", spacy_words)
-        print("T5 tokens:  ", t5_tokens)
+        # print("\n" + "=" * 80)
+        # print(f"Caption {caption_id}: {caption}")
+        # print("spaCy words:", spacy_words)
+        # print("T5 tokens:  ", t5_tokens)
 
         word_idx = 0
         piece_buffer = ""
@@ -82,16 +82,16 @@ def main():
                 }
                 aligned_rows.append(row)
 
-                print(
-                    f"Aligned: word='{target_word}', "
-                    f"category='{spacy_categories[word_idx]}', "
-                    f"matched_subword='{sub_token}'"
-                )
+                # print(
+                #     f"Aligned: word='{target_word}', "
+                #     f"category='{spacy_categories[word_idx]}', "
+                #     f"matched_subword='{sub_token}'"
+                # )
 
                 word_idx += 1
                 piece_buffer = ""
 
-        print(f"Aligned {word_idx} / {len(spacy_words)} words.")
+        # print(f"Aligned {word_idx} / {len(spacy_words)} words.")
     
     print("\n" + "=" * 80)
     print(f"Total aligned rows: {len(aligned_rows)}")
