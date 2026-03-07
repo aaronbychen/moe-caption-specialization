@@ -1,3 +1,4 @@
+import os
 import torch
 import spacy
 from transformers import T5Tokenizer, T5EncoderModel
@@ -11,14 +12,14 @@ def main():
         "A red bus is parked on the street."
     ]
 
-    # Load models
+    # load models
     tokenizer = T5Tokenizer.from_pretrained("t5-small")
     model = T5EncoderModel.from_pretrained("t5-small")
     model.eval()
 
     nlp = spacy.load("en_core_web_sm")
 
-    # Tokenize captions with T5
+    # tokenize captions with T5
     inputs = tokenizer(
         captions,
         return_tensors="pt",
@@ -65,10 +66,11 @@ def main():
             piece_buffer += piece
             target_word = spacy_words[word_idx]
 
-            # Compare in lowercase for robustness
+            # compare in lowercase for robustness
             if piece_buffer.lower() == target_word.lower():
                 row = {
                     "caption_id": caption_id,
+                    "caption": caption,
                     "word": target_word,
                     "category": spacy_categories[word_idx],
                     "subword_token": sub_token,
@@ -86,19 +88,15 @@ def main():
                 piece_buffer = ""
 
         print(f"Aligned {word_idx} / {len(spacy_words)} words.")
-
+    
     print("\n" + "=" * 80)
     print(f"Total aligned rows: {len(aligned_rows)}")
+    
+    os.makedirs("artifacts", exist_ok=True)
+    save_path = "artifacts/aligned_token_table.pt"
+    torch.save(aligned_rows, save_path)
 
-    if aligned_rows:
-        print("Sample row:")
-        sample = aligned_rows[0]
-        print(
-            f"caption_id={sample['caption_id']}, "
-            f"word={sample['word']}, "
-            f"category={sample['category']}, "
-            f"vector_shape={sample['vector'].shape}"
-        )
+    print(f"Saved aligned token table to {save_path}")
 
 
 if __name__ == "__main__":
