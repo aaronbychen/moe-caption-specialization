@@ -17,6 +17,6 @@ Discussion
 
 The T5 baseline with post-hoc K-Means clustering consistently outperforms Switch Transformer's learned routing on both ARI and V-Measure. This suggests that the Switch router does NOT naturally learn linguistically meaningful expert specialization.
 
-The Switch router shows higher entropy per category and greater load imbalance (CV=0.725 vs 0.606), indicating that routing decisions are driven by factors other than semantic category ¡ª likely token frequency, positional patterns, or the auxiliary load-balancing loss.
+The Switch router shows higher entropy per category and greater load imbalance (CV=0.725 vs 0.606), indicating that routing decisions are driven by factors other than semantic category -- likely token frequency, positional patterns, or the auxiliary load-balancing loss.
 
 Key takeaway: MoE expert specialization in text encoding appears to be an emergent property of representation geometry (capturable by K-Means) rather than a learned routing strategy.
