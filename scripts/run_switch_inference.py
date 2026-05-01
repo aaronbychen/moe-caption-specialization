@@ -7,7 +7,7 @@ from src.utils.labeling import map_pos_to_category, normalize_t5_piece
 
 
 def main():
-    dataset = load_dataset("phiyodr/coco2017", split="train")
+    dataset = load_dataset("phiyodr/coco2017", split="train[:10000]")
     captions = []
     for example in dataset:
         if "captions" in example and len(example["captions"]) > 0:
@@ -118,7 +118,7 @@ def main():
     print(f"\nTotal aligned rows: {len(aligned_rows)}")
     
     os.makedirs("artifacts", exist_ok=True)
-    save_path = "artifacts/switch_token_table.pt"
+    save_path = "artifacts/switch_token_table_10000.pt"
     torch.save(aligned_rows, save_path)
 
     print(f"Saved Switch token table to {save_path}")
