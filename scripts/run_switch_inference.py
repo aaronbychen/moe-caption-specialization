@@ -119,7 +119,7 @@ def main():
     print(f"\nTotal aligned rows: {len(aligned_rows)}")
     
     os.makedirs("artifacts", exist_ok=True)
-    save_path = "artifacts/switch_token_table.pt"
+    save_path = "artifacts/switch_token_table_10000.pt"
     torch.save(aligned_rows, save_path)
 
     print(f"Saved Switch token table to {save_path}")
