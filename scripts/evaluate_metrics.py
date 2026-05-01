@@ -69,94 +69,70 @@ def compute_entropy_per_category(categories, assignments):
     avg_entropy = sum(entropies.values()) / len(entropies) if entropies else 0.0
     return entropies, avg_entropy
 
+def eval_model(label, categories, assignments, n):
+    """Compute all metrics for a single model and print results."""
+    ari = adjusted_rand_score(categories, assignments)
+    vmeasure = v_measure_score(categories, assignments)
+    cat_entropy, avg_entropy = compute_entropy_per_category(categories, assignments)
+    counts, load_cv = compute_load_metrics(assignments, n)
+    purities, avg_purity = compute_purity(categories, assignments, n)
+
+    print(f"\n[{label}]")
+    print(f"  Metrics  -> ARI: {ari:.4f} | V-Meas: {vmeasure:.4f} | Avg Entropy: {avg_entropy:.4f}")
+    print(f"  Purity   -> Avg: {avg_purity:.4f}")
+    print(f"  Load     -> CV: {load_cv:.4f}")
+    print(f"  Counts   -> {counts}")
+    print("  Per-Expert Purity:")
+    for eid in sorted(purities):
+        print(f"    {eid}: {purities[eid]:.4f}")
+    print("  Category Entropies:")
+    for cat, ent in sorted(cat_entropy.items()):
+        print(f"    {cat:<12}: {ent:.4f} bits")
+
+    return {
+        "ari": ari, "v_measure": vmeasure,
+        "avg_entropy": avg_entropy, "load_cv": load_cv,
+        "avg_purity": avg_purity,
+        "per_expert_purity": {str(k): v for k, v in purities.items()},
+        "expert_counts": counts
+    }
+
 def main():
     all_files = glob.glob("artifacts/aligned_token_table_part*.pt")
     t5_data = []
     for file in all_files:
         t5_data.extend(torch.load(file))
 
-    t5_vectors = torch.stack([row["vector"] for row in t5_data])
+    t5_vectors = torch.stack([row["vector"] for row in t5_data]).numpy().astype("float32")
     t5_categories = [row["category"] for row in t5_data]
 
     print(f"Loaded {len(t5_data)} T5 aligned tokens.")
 
     results = {}
 
-    for n in [8]:
-        print(f"\nEvaluating N = {n} Experts/Clusters...")
+    for n in [4, 8, 16]:
+        print(f"\n{'='*60}")
+        print(f"Evaluating N = {n}")
+        print(f"{'='*60}")
 
         # --- T5 K-Means ---
         kmeans = KMeans(n_clusters=n, random_state=42, n_init="auto")
-        t5_clusters = kmeans.fit_predict(t5_vectors.numpy().astype("float32"))
+        t5_clusters = kmeans.fit_predict(t5_vectors)
+        t5_result = eval_model(f"T5 K-Means (k={n})", t5_categories, t5_clusters.tolist(), n)
 
-        t5_ari = adjusted_rand_score(t5_categories, t5_clusters)
-        t5_vmeasure = v_measure_score(t5_categories, t5_clusters)
-        t5_cat_entropy, t5_avg_entropy = compute_entropy_per_category(t5_categories, t5_clusters)
-        t5_counts, t5_load_cv = compute_load_metrics(t5_clusters, n)
-        t5_purities, t5_avg_purity = compute_purity(t5_categories, t5_clusters, n)
+        entry = {"t5_baseline": t5_result}
 
-        # --- Switch Model ---
-        try:
-            switch_data = torch.load(f"artifacts/switch_token_table_{n}.pt")
-        except FileNotFoundError:
-            print(f"  -> Skipping Switch-{n}: File not found.")
-            continue
+        # --- Switch Model (only available for N=8) ---
+        sw_path = f"artifacts/switch_token_table_{n}.pt"
+        if os.path.exists(sw_path):
+            switch_data = torch.load(sw_path)
+            switch_expert_ids = [row["expert_id"] for row in switch_data]
+            switch_categories = [row["category"] for row in switch_data]
+            entry["switch_model"] = eval_model(f"Switch MoE (N={n})", switch_categories, switch_expert_ids, n)
+        else:
+            print(f"\n  [!] No Switch data for N={n}, T5-only comparison.")
 
-        switch_expert_ids = [row["expert_id"] for row in switch_data]
-        switch_categories = [row["category"] for row in switch_data]
-
-        switch_ari = adjusted_rand_score(switch_categories, switch_expert_ids)
-        switch_vmeasure = v_measure_score(switch_categories, switch_expert_ids)
-        switch_cat_entropy, switch_avg_entropy = compute_entropy_per_category(switch_categories, switch_expert_ids)
-        switch_counts, switch_load_cv = compute_load_metrics(switch_expert_ids, n)
-        switch_purities, switch_avg_purity = compute_purity(switch_categories, switch_expert_ids, n)
-
-        # Store Results
-        results[f"n_{n}"] = {
-            "t5_baseline": {
-                "ari": t5_ari,
-                "v_measure": t5_vmeasure,
-                "avg_entropy": t5_avg_entropy,
-                "load_cv": t5_load_cv,
-                "avg_purity": t5_avg_purity,
-                "per_expert_purity": {str(k): v for k, v in t5_purities.items()},
-                "expert_counts": t5_counts
-            },
-            "switch_model": {
-                "ari": switch_ari,
-                "v_measure": switch_vmeasure,
-                "avg_entropy": switch_avg_entropy,
-                "load_cv": switch_load_cv,
-                "avg_purity": switch_avg_purity,
-                "per_expert_purity": {str(k): v for k, v in switch_purities.items()},
-                "expert_counts": switch_counts
-            }
-        }
-
-        # --- Print Detailed Comparison ---
-        print(f"\n[T5 Baseline (K-Means)]")
-        print(f"  Metrics  -> ARI: {t5_ari:.4f} | V-Meas: {t5_vmeasure:.4f} | Avg Entropy: {t5_avg_entropy:.4f}")
-        print(f"  Purity   -> Avg: {t5_avg_purity:.4f}")
-        print(f"  Load     -> CV: {t5_load_cv:.4f} (Perfect=0.0)")
-        print(f"  Counts   -> {t5_counts}")
-        print("  Per-Cluster Purity:")
-        for eid in sorted(t5_purities):
-            print(f"    Cluster {eid}: {t5_purities[eid]:.4f}")
-        print("  Category Entropies:")
-        for cat, ent in sorted(t5_cat_entropy.items()):
-            print(f"    {cat:<12}: {ent:.4f} bits")
-
-        print(f"\n[Switch MoE (Router)]")
-        print(f"  Metrics  -> ARI: {switch_ari:.4f} | V-Meas: {switch_vmeasure:.4f} | Avg Entropy: {switch_avg_entropy:.4f}")
-        print(f"  Purity   -> Avg: {switch_avg_purity:.4f}")
-        print(f"  Load     -> CV: {switch_load_cv:.4f} (Perfect=0.0)")
-        print(f"  Counts   -> {switch_counts}")
-        print("  Per-Expert Purity:")
-        for eid in sorted(switch_purities):
-            print(f"    Expert {eid}: {switch_purities[eid]:.4f}")
-        print("  Category Entropies:")
-        for cat, ent in sorted(switch_cat_entropy.items()):
-            print(f"    {cat:<12}: {ent:.4f} bits")
+        results[f"n_{n}"] = entry
         print("-" * 60)
 
     with open("artifacts/eval_metrics.json", "w") as f:
