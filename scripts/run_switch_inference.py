@@ -3,7 +3,7 @@ import torch
 import spacy
 from datasets import load_dataset
 from transformers import AutoTokenizer, SwitchTransformersForConditionalGeneration
-from src.utils.labeling import map_pos_to_category, normalize_t5_piece
+from src.utils.labeling import map_pos_to_category, map_pos_to_fine_category, normalize_t5_piece
 
 
 def main():
@@ -81,6 +81,7 @@ def main():
             doc = nlp(caption)
             spacy_words = [token.text for token in doc]
             spacy_categories = [map_pos_to_category(token) for token in doc]
+            spacy_fine_categories = [map_pos_to_fine_category(token) for token in doc]
 
             valid_len = attention_mask[i].sum().item()
             ids = input_ids[i][:valid_len].tolist()
@@ -107,6 +108,7 @@ def main():
                         "caption_id": caption_id,
                         "word": target_word,
                         "category": spacy_categories[word_idx],
+                        "fine_category": spacy_fine_categories[word_idx],
                         "expert_id": experts[sub_idx].item()
                     }
                     aligned_rows.append(row)

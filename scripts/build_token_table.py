@@ -3,7 +3,7 @@ import torch
 import spacy
 from datasets import load_dataset
 from transformers import T5Tokenizer, T5EncoderModel
-from src.utils.labeling import map_pos_to_category, normalize_t5_piece
+from src.utils.labeling import map_pos_to_category, map_pos_to_fine_category, normalize_t5_piece
 
 
 def main():
@@ -50,6 +50,7 @@ def main():
             doc = nlp(caption)
             spacy_words = [token.text for token in doc]
             spacy_categories = [map_pos_to_category(token) for token in doc]
+            spacy_fine_categories = [map_pos_to_fine_category(token) for token in doc]
 
             valid_len = attention_mask[_id].sum().item()  # <= seq_len
             ids = input_ids[_id][:valid_len].tolist()  # (valid_len)
@@ -83,6 +84,7 @@ def main():
                         "caption": caption,
                         "word": target_word,
                         "category": spacy_categories[word_idx],
+                        "fine_category": spacy_fine_categories[word_idx],
                         "subword_token": sub_token,
                         "vector": t5_vectors[sub_idx].detach().cpu().clone()
                     }

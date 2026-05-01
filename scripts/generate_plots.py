@@ -28,11 +28,8 @@ def make_heatmap(ct_norm, cmap, title, save_path, n_experts):
 
 
 def make_load_balance_chart(t5_counts, sw_counts, n, save_path):
-    """Side-by-side bar chart comparing T5 cluster sizes vs Switch expert loads."""
     x = np.arange(n)
     width = 0.35
-
-    # normalize to percentages
     t5_pct = np.array(t5_counts) / sum(t5_counts) * 100
     sw_pct = np.array(sw_counts) / sum(sw_counts) * 100
     ideal = 100.0 / n
@@ -41,7 +38,6 @@ def make_load_balance_chart(t5_counts, sw_counts, n, save_path):
     ax.bar(x - width / 2, t5_pct, width, label="T5 K-Means", color="#4C72B0")
     ax.bar(x + width / 2, sw_pct, width, label="Switch Router", color="#DD8452")
     ax.axhline(ideal, color="gray", linestyle="--", linewidth=1, label=f"Ideal ({ideal:.1f}%)")
-
     ax.set_xlabel("Expert / Cluster ID", fontsize=FONT["label"])
     ax.set_ylabel("Token Share (%)", fontsize=FONT["label"])
     ax.set_title(f"Load Distribution (N={n})", fontsize=FONT["title"], pad=14)
@@ -64,21 +60,12 @@ def print_top_words(df, id_col, label, max_ids=8):
         print(f"  {label} {gid}: {', '.join(top)}")
 
 
-def main():
-    os.makedirs("artifacts", exist_ok=True)
-
-    # --- T5 ---
-    all_files = glob.glob("artifacts/aligned_token_table_part*.pt")
-    t5_data = []
-    for file in all_files:
-        t5_data.extend(torch.load(file))
-    vectors = torch.stack([r["vector"] for r in t5_data]).numpy()
-
+def generate_heatmaps(t5_data, vectors, cat_key, tag):
+    """Generate heatmaps for a given category key (coarse or fine)."""
     for n in [8]:
-        print(f"\n----Generating Plots for N={n}----")
+        print(f"\n---- {tag} Heatmaps (N={n}) ----")
 
-        t5_df = pd.DataFrame([{"word": r["word"], "category": r["category"],
-                               "vector": r["vector"].numpy()} for r in t5_data])
+        t5_df = pd.DataFrame([{"word": r["word"], "category": r[cat_key]} for r in t5_data])
         t5_df["cluster"] = KMeans(n_clusters=n, random_state=42).fit_predict(vectors)
 
         ct_t5 = pd.crosstab(t5_df["cluster"], t5_df["category"])
@@ -86,17 +73,18 @@ def main():
         ct_t5_norm.index.name = "Cluster ID"
 
         make_heatmap(ct_t5_norm, "Blues",
-                    f"T5 Baseline (k={n}): Latent Clusters vs. Semantic Categories",
-                    f"artifacts/t5_heatmap_{n}.png", n)
-        print_top_words(t5_df, "cluster", "T5 Cluster")
+                    f"T5 Baseline (k={n}): Clusters vs. {tag} Categories",
+                    f"artifacts/t5_heatmap_{tag}_{n}.png", n)
 
-        # --- Switch ---
+        # Switch
         try:
             sw_data = torch.load(f"artifacts/switch_token_table_{n}.pt")
         except FileNotFoundError:
-            print(f"Switch data for n={n} not found. Skipping plot.")
+            print(f"Switch data for n={n} not found. Skipping.")
             continue
-        sw_df = pd.DataFrame([{"word": r["word"], "category": r["category"],
+
+        sw_cat_key = cat_key if cat_key in sw_data[0] else "category"
+        sw_df = pd.DataFrame([{"word": r["word"], "category": r[sw_cat_key],
                                 "expert_id": r["expert_id"]} for r in sw_data])
 
         ct_sw = pd.crosstab(sw_df["expert_id"], sw_df["category"])
@@ -104,14 +92,30 @@ def main():
         ct_sw_norm.index.name = "Expert ID"
 
         make_heatmap(ct_sw_norm, "Oranges",
-                    f"Switch MoE (N={n}): Routing Experts vs. Semantic Categories",
-                    f"artifacts/switch_heatmap_{n}.png", n)
-        print_top_words(sw_df, "expert_id", "Switch Expert")
+                    f"Switch MoE (N={n}): Experts vs. {tag} Categories",
+                    f"artifacts/switch_heatmap_{tag}_{n}.png", n)
 
-        # --- Load Balance Bar Chart ---
-        t5_counts = [int(ct_t5.loc[i].sum()) if i in ct_t5.index else 0 for i in range(n)]
-        sw_counts = [int(ct_sw.loc[i].sum()) if i in ct_sw.index else 0 for i in range(n)]
-        make_load_balance_chart(t5_counts, sw_counts, n, f"artifacts/load_balance_{n}.png")
+        # Load balance chart (only for coarse to avoid duplication)
+        if tag == "coarse":
+            t5_counts = [int(ct_t5.loc[i].sum()) if i in ct_t5.index else 0 for i in range(n)]
+            sw_counts = [int(ct_sw.loc[i].sum()) if i in ct_sw.index else 0 for i in range(n)]
+            make_load_balance_chart(t5_counts, sw_counts, n, f"artifacts/load_balance_{n}.png")
+
+
+def main():
+    os.makedirs("artifacts", exist_ok=True)
+
+    all_files = glob.glob("artifacts/aligned_token_table_part*.pt")
+    t5_data = []
+    for file in all_files:
+        t5_data.extend(torch.load(file))
+    vectors = torch.stack([r["vector"] for r in t5_data]).numpy()
+
+    has_fine = "fine_category" in t5_data[0] if t5_data else False
+
+    generate_heatmaps(t5_data, vectors, "category", "coarse")
+    if has_fine:
+        generate_heatmaps(t5_data, vectors, "fine_category", "fine")
 
 
 if __name__ == "__main__":
