@@ -7,7 +7,7 @@ from src.utils.labeling import map_pos_to_category, normalize_t5_piece
 
 
 def main():
-    dataset = load_dataset("phiyodr/coco2017", split="train")
+    dataset = load_dataset("phiyodr/coco2017", split="train[:10000]")
     captions = []
     for example in dataset:
         if "captions" in example and len(example["captions"]) > 0:
@@ -104,6 +104,7 @@ def main():
 
                 if piece_buffer.lower() == target_word.lower():
                     row = {
+                        "caption_id": caption_id,
                         "word": target_word,
                         "category": spacy_categories[word_idx],
                         "expert_id": experts[sub_idx].item()
