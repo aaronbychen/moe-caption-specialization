@@ -1,6 +1,6 @@
 def map_pos_to_category(token):
     """
-    Map spaCy POS tags to coarse semantic categories.
+    Map spaCy POS tags to coarse semantic categories (5 classes).
     """
     if token.pos_ in {"NOUN", "PROPN", "PRON"}:
         return "object"
@@ -13,13 +13,31 @@ def map_pos_to_category(token):
     else:
         return "functional"
 
-def normalize_t5_piece(token_str):
+
+def map_pos_to_fine_category(token):
     """
-    Convert a T5 subword token into a comparable text fragment.
+    Map spaCy POS tags to fine-grained semantic categories (9 classes).
+    Splits coarse groups into more specific linguistic roles.
     """
-    if token_str == "</s>":
-        return ""
-    return token_str.replace("▁", "")
+    if token.pos_ == "NOUN":
+        return "noun"
+    elif token.pos_ == "PROPN":
+        return "proper_noun"
+    elif token.pos_ == "PRON":
+        return "pronoun"
+    elif token.pos_ == "ADJ":
+        return "adjective"
+    elif token.pos_ == "VERB":
+        return "verb"
+    elif token.pos_ == "AUX":
+        return "auxiliary"
+    elif token.pos_ in {"ADP", "SCONJ"}:
+        return "relation"
+    elif token.pos_ == "ADV":
+        return "adverb"
+    else:
+        return "functional"
+
 
 def normalize_t5_piece(token_str):
     """
@@ -32,4 +50,4 @@ def normalize_t5_piece(token_str):
     """
     if token_str == "</s>":
         return ""
-    return token_str.replace("▁", "")
+    return token_str.replace("\u2581", "")
