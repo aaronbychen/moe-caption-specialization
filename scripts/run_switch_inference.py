@@ -104,6 +104,7 @@ def main():
 
                 if piece_buffer.lower() == target_word.lower():
                     row = {
+                        "caption_id": caption_id,
                         "word": target_word,
                         "category": spacy_categories[word_idx],
                         "expert_id": experts[sub_idx].item()
