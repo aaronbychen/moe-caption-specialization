@@ -15,66 +15,61 @@ def main():
 
     print(f"Loaded {len(captions)} captions from phiyodr/coco2017.")
 
-    # load Switch model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained("google/switch-base-8")
     model = SwitchTransformersForConditionalGeneration.from_pretrained("google/switch-base-8", torch_dtype=torch.float32)
     model.eval()
 
-    nlp = spacy.load("en_core_web_sm")
+    # collect all MoE layer routers
+    moe_routers = []
+    for block in model.encoder.block:
+        if hasattr(block.layer[-1], 'mlp') and hasattr(block.layer[-1].mlp, 'router'):
+            moe_routers.append(block.layer[-1].mlp.router)
+    print(f"Found {len(moe_routers)} MoE layers in encoder.")
 
+    nlp = spacy.load("en_core_web_sm")
     aligned_rows = []
 
-    # process in small batches to avoid OOM
     batch_size = 8
     for batch_start in range(0, len(captions), batch_size):
         batch_captions = captions[batch_start:batch_start + batch_size]
-        
-        inputs = tokenizer(
-            batch_captions,
-            return_tensors="pt",
-            padding=True,
-            truncation=True
-        )
+
+        inputs = tokenizer(batch_captions, return_tensors="pt", padding=True, truncation=True)
 
         with torch.no_grad():
-            outputs = model.encoder(**inputs)
+            # get hidden states from all layers
+            outputs = model.encoder(**inputs, output_hidden_states=True)
 
-        # manually compute router logits from hidden states
-        hidden_states = outputs.last_hidden_state
+        hidden_states_all = outputs.hidden_states  # tuple of (batch, seq, 768) per layer
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
-        
-        # get the first MoE layer's router
-        first_moe_layer = None
-        for layer in model.encoder.block:
-            if hasattr(layer.layer[-1], 'mlp') and hasattr(layer.layer[-1].mlp, 'router'):
-                first_moe_layer = layer.layer[-1]
-                break
-        
-        # pass through layer norm and get router logits
-        batch_len = input_ids.shape[0]
-        seq_len = input_ids.shape[1]
-        
-        # we need to recompute through the first MoE layer to get routing
-        # simpler approach: just use the router classifier on the hidden states
-        router = first_moe_layer.mlp.router
-        
-        # flatten hidden states
-        hidden_flat = hidden_states.view(-1, hidden_states.shape[-1])
-        
-        # get full router logits before top-k
-        with torch.no_grad():
-            router_logits = router.classifier(hidden_flat)  # (batch*seq, num_experts)
-        
+        batch_len, seq_len = input_ids.shape
+
+        # compute router logits for each MoE layer
+        # MoE layers are at blocks 1,3,5,7,9,11 -> hidden_states indices 2,4,6,8,10,12
+        # (hidden_states[0] = embedding, hidden_states[i] = output of block i-1)
+        moe_block_indices = [1, 3, 5, 7, 9, 11]
+        all_layer_logits = []  # list of (batch, seq, 8)
+        all_layer_experts = []  # list of (batch, seq)
+
+        for router, block_idx in zip(moe_routers, moe_block_indices):
+            # input to block i is hidden_states[i] (output of previous block)
+            h = hidden_states_all[block_idx]  # (batch, seq, 768)
+            h_flat = h.reshape(-1, h.shape[-1])
+            with torch.no_grad():
+                logits = router.classifier(h_flat)  # (batch*seq, 8)
+            logits = logits.view(batch_len, seq_len, -1)
+            all_layer_logits.append(logits)
+            all_layer_experts.append(logits.argmax(dim=-1))
+
+        # first MoE layer expert (backward compat)
+        expert_ids_first = all_layer_experts[0]
+        # all-layer soft probs concatenated: (batch, seq, 48)
+        all_layer_probs = torch.cat([torch.softmax(lg, dim=-1) for lg in all_layer_logits], dim=-1)
+
         if batch_start == 0:
-            print(f"Router logits shape: {router_logits.shape}")
-            print(f"Sample logits:\n{router_logits[:5]}")
-            print(f"Expert assignments: {router_logits[:5].argmax(dim=-1)}")
-        
-        expert_ids = router_logits.argmax(dim=-1).view(batch_len, seq_len)
-
-        input_ids = inputs["input_ids"]
-        attention_mask = inputs["attention_mask"]
+            print(f"Per-layer logits shape: {all_layer_logits[0].shape}")
+            print(f"All-layer probs shape: {all_layer_probs.shape}")
+            print(f"First layer expert assignments: {expert_ids_first[0][:10]}")
 
         for i, caption in enumerate(batch_captions):
             caption_id = batch_start + i
@@ -86,17 +81,16 @@ def main():
             valid_len = attention_mask[i].sum().item()
             ids = input_ids[i][:valid_len].tolist()
             t5_tokens = tokenizer.convert_ids_to_tokens(ids)
-            experts = expert_ids[i][:valid_len]
+            experts_first = expert_ids_first[i][:valid_len]
+            probs_all = all_layer_probs[i][:valid_len]  # (valid_len, 48)
 
             word_idx = 0
             piece_buffer = ""
 
             for sub_idx, sub_token in enumerate(t5_tokens):
                 piece = normalize_t5_piece(sub_token)
-
                 if piece == "":
                     continue
-
                 if word_idx >= len(spacy_words):
                     break
 
@@ -109,21 +103,23 @@ def main():
                         "word": target_word,
                         "category": spacy_categories[word_idx],
                         "fine_category": spacy_fine_categories[word_idx],
-                        "expert_id": experts[sub_idx].item()
+                        "expert_id": experts_first[sub_idx].item(),
+                        "all_layer_probs": probs_all[sub_idx].cpu(),
                     }
                     aligned_rows.append(row)
-
                     word_idx += 1
                     piece_buffer = ""
 
-        print(f"Processed batch {batch_start // batch_size + 1} / {(len(captions) + batch_size - 1) // batch_size}")
+        batch_num = batch_start // batch_size + 1
+        total_batches = (len(captions) + batch_size - 1) // batch_size
+        if batch_num % 50 == 0 or batch_num == total_batches:
+            print(f"Processed batch {batch_num} / {total_batches}")
 
     print(f"\nTotal aligned rows: {len(aligned_rows)}")
-    
+
     os.makedirs("artifacts", exist_ok=True)
     save_path = "artifacts/switch_token_table_8.pt"
     torch.save(aligned_rows, save_path)
-
     print(f"Saved Switch token table to {save_path}")
 
 
