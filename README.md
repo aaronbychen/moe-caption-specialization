@@ -4,9 +4,9 @@ Analyzing whether MoE (Mixture-of-Experts) routers learn linguistically meaningf
 
 ## Research Question
 
-When a Switch Transformer encodes text, do its experts naturally specialize along linguistic dimensions (e.g., nouns → expert A, verbs → expert B)? Or is routing driven primarily by load balancing rather than semantic structure?
+When a Switch Transformer encodes text, do its experts naturally specialize along linguistic dimensions (e.g., nouns → expert A, verbs → expert B)? Or is routing driven primarily by load balancing, lexical identity, and syntactic regularities?
 
-We compare **Switch-base-8** router assignments against a **T5-base + K-Means** baseline to measure alignment between expert/cluster assignments and POS-based semantic categories at two granularities:
+We compare **Switch-base-8** router assignments against a **T5-base + K-Means** baseline to measure alignment between expert/cluster assignments and POS-derived linguistic categories at two granularities:
 
 - **Coarse** (5 classes): object, attribute, relation, action, functional
 - **Fine-grained** (9 classes): noun, proper_noun, pronoun, adjective, verb, auxiliary, relation, adverb, functional
@@ -29,9 +29,9 @@ All results evaluated on a held-out test set (caption-level 80/20 split). PCA, K
 | **Switch all-layer 48D** | **48** | **81.7%** | **0.670** | **0.430** |
 | Word identity baseline | - | 94.8% | 0.929 | 0.880 |
 
-Under a dimensionality-matched unsupervised comparison, Switch all-layer routing features outperform T5 PCA at equal dimensionality (+5.6% accuracy at 8D). With all 48 dimensions, Switch routing outperforms the T5 768D KMeans baseline while using 16x fewer features.
+Under a dimensionality-matched unsupervised comparison, Switch all-layer routing features outperform T5 PCA at equal dimensionality (+5.6% accuracy at 8D). The 48D all-layer routing features are competitive with the T5 768D KMeans baseline: they achieve higher accuracy, slightly lower macro-F1, and comparable ARI while using 16x fewer features. The macro-F1 gap between Switch 48D (0.670) and Switch PCA-8D (0.769) is explained by per-class analysis: the 48D KMeans partition fails to allocate a cluster for the minority attribute class, which raises accuracy on larger classes but hurts macro-F1. This illustrates why we report both metrics.
 
-The word identity baseline (94.8%) shows that POS category is largely determined by lexical identity. The routing features capture substantial lexical-syntactic structure, though they do not exceed a direct lexical lookup.
+The word identity baseline (94.8%) shows that POS category is largely determined by lexical identity. The routing features capture substantial lexical-syntactic structure, though they do not exceed a direct lexical lookup and should be interpreted as compact lexical-syntactic signals rather than evidence of deep semantic understanding.
 
 ### 3-Seed Robustness (Coarse, mean±std)
 
