@@ -20,18 +20,18 @@ All results evaluated on a held-out test set (caption-level 80/20 split). PCA, K
 | Feature | Dim | Accuracy | Macro-F1 | ARI |
 |---|---|---|---|---|
 | Random baseline | - | 20.0% | - | - |
-| Majority baseline | - | 35.4% | 0.105 | - |
-| Switch hard expert ID | 8 | 72.4% | 0.581 | 0.341 |
-| T5 PCA-8D | 8 | 75.6% | 0.610 | 0.343 |
-| **Switch all-layer PCA-8D** | **8** | **81.2%** | **0.769** | **0.376** |
-| T5 PCA-32D | 32 | 75.5% | 0.606 | 0.334 |
-| T5 768D KMeans baseline | 768 | 76.9% | 0.695 | 0.430 |
-| **Switch all-layer 48D** | **48** | **81.7%** | **0.670** | **0.430** |
-| Word identity baseline | - | 94.8% | 0.929 | 0.880 |
+| Majority baseline | - | 34.6% | 0.103 | - |
+| Switch hard expert ID | 8 | 71.9% | 0.579 | 0.334 |
+| T5 PCA-8D | 8 | 75.3% | 0.602 | 0.347 |
+| **Switch all-layer PCA-8D** | **8** | **80.7%** | **0.659** | **0.416** |
+| T5 PCA-32D | 32 | 75.6% | 0.607 | 0.349 |
+| T5 768D KMeans baseline | 768 | 72.3% | 0.468 | 0.327 |
+| **Switch all-layer 48D** | **48** | **82.1%** | **0.801** | **0.441** |
+| Word identity baseline | - | 97.6% | 0.968 | 0.946 |
 
-Under a dimensionality-matched unsupervised comparison, Switch all-layer routing features outperform T5 PCA at equal dimensionality (+5.6% accuracy at 8D). The 48D all-layer routing features are competitive with the T5 768D KMeans baseline: they achieve higher accuracy, slightly lower macro-F1, and comparable ARI while using 16x fewer features. The macro-F1 gap between Switch 48D (0.670) and Switch PCA-8D (0.769) is explained by per-class analysis: the 48D KMeans partition fails to allocate a cluster for the minority attribute class, which raises accuracy on larger classes but hurts macro-F1. This illustrates why we report both metrics.
+Under a dimensionality-matched unsupervised comparison, Switch all-layer routing features outperform T5 PCA at equal dimensionality (+5.4% accuracy at 8D). Switch all-layer 48D now beats T5 768D KMeans on all metrics (accuracy, macro-F1, ARI) while using 16x fewer features. The macro-F1 gap between Switch PCA-8D (0.659) and Switch 48D (0.801) reflects the 48D model's ability to cover all 5 coarse classes including the minority attribute class, while PCA-8D misses it — illustrating why we report both metrics.
 
-The word identity baseline (94.8%) shows that POS category is largely determined by lexical identity. The routing features capture substantial lexical-syntactic structure, though they do not exceed a direct lexical lookup and should be interpreted as compact lexical-syntactic signals rather than evidence of deep semantic understanding.
+The word identity baseline (97.6%) shows that POS category is largely determined by lexical identity. The routing features capture substantial lexical-syntactic structure, though they do not exceed a direct lexical lookup and should be interpreted as compact lexical-syntactic signals rather than evidence of deep semantic understanding.
 
 ### 3-Seed Robustness (Coarse, mean±std)
 

@@ -155,14 +155,14 @@ def run_benchmark(t5_train, t5_test, sw_train, sw_test, cat_key, n=8):
 
 def main():
     # Load data
-    all_files = glob.glob("artifacts/**/aligned_token_table_part*.pt", recursive=True)
+    all_files = glob.glob("artifacts/aligned_token_table_part*.pt")
     t5_data = []
     for f in all_files:
         t5_data.extend(torch.load(f))
     print(f"Loaded {len(t5_data)} T5 tokens")
 
     sw_data = None
-    for p in glob.glob("artifacts/**/switch_token_table_8.pt", recursive=True):
+    for p in glob.glob("artifacts/switch_token_table_8.pt"):
         sw_data = torch.load(p)
         break
 
