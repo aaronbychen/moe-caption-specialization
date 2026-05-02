@@ -45,15 +45,20 @@ def word_identity_baseline(train_words, train_cats, test_words, test_cats):
     preds = [word_map.get(w.lower(), fallback) for w in test_words]
     return score(test_cats, preds)
 
-def split_by_caption(data, test_ratio=0.2, seed=42):
-    caption_ids = sorted(set(row["caption_id"] for row in data))
-    rng = np.random.RandomState(seed)
+def split_data(data):
+    """Split by 'split' field. Falls back to caption-level 80/20 if no split field."""
+    if data and "split" in data[0]:
+        train = [r for r in data if r["split"] == "train"]
+        test = [r for r in data if r["split"] == "val"]
+        return train, test
+    # fallback
+    caption_ids = sorted(set(r["caption_id"] for r in data))
+    rng = np.random.RandomState(42)
     rng.shuffle(caption_ids)
-    split_idx = int(len(caption_ids) * (1 - test_ratio))
+    split_idx = int(len(caption_ids) * 0.8)
     train_ids = set(caption_ids[:split_idx])
-    train = [r for r in data if r["caption_id"] in train_ids]
-    test = [r for r in data if r["caption_id"] not in train_ids]
-    return train, test
+    return ([r for r in data if r["caption_id"] in train_ids],
+            [r for r in data if r["caption_id"] not in train_ids])
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +74,7 @@ def eval_clustering(train_cats, train_features, test_cats, test_features, n):
     test_preds = apply_mapping(test_clusters, mapping)
     result = score(test_cats, test_preds)
     result["ari"] = adjusted_rand_score(test_cats, test_clusters)
-    result["preds"] = test_preds  # for per-class analysis
+    result["preds"] = test_preds
     return result
 
 def eval_expert_ids(train_cats, train_ids, test_cats, test_ids, n):
@@ -82,15 +87,17 @@ def eval_expert_ids(train_cats, train_ids, test_cats, test_ids, n):
 
 
 # ---------------------------------------------------------------------------
-# Single-seed benchmark run
+# Benchmark
 # ---------------------------------------------------------------------------
 
-def run_benchmark(t5_data, sw_data, cat_key, seed, n=8):
-    """Run full benchmark for one seed. Returns dict of results."""
-    t5_train, t5_test = split_by_caption(t5_data, seed=seed)
-    has_switch = sw_data is not None
-    has_all_layer = has_switch and "all_layer_probs" in sw_data[0]
+FEATURE_ORDER = ["random", "majority", "word_identity", "switch_hard",
+                 "t5_pca_8d", "switch_all_layer_pca_8d", "t5_pca_32d",
+                 "t5_768d", "switch_all_layer_48d"]
+DIM_MAP = {"random": "-", "majority": "-", "word_identity": "-",
+           "switch_hard": "8", "t5_pca_8d": "8", "switch_all_layer_pca_8d": "8",
+           "t5_pca_32d": "32", "switch_all_layer_48d": "48", "t5_768d": "768"}
 
+def run_benchmark(t5_train, t5_test, sw_train, sw_test, cat_key, n=8):
     train_cats = [r[cat_key] for r in t5_train]
     test_cats = [r[cat_key] for r in t5_test]
     train_vecs = torch.stack([r["vector"] for r in t5_train]).numpy().astype("float32")
@@ -120,8 +127,7 @@ def run_benchmark(t5_data, sw_data, cat_key, seed, n=8):
     results["t5_pca_32d"] = eval_clustering(train_cats, pca32.transform(train_vecs), test_cats, pca32.transform(test_vecs), n)
 
     # Switch
-    if has_switch:
-        sw_train, sw_test = split_by_caption(sw_data, seed=seed)
+    if sw_train:
         sw_train_cats = [r.get(cat_key, r["category"]) for r in sw_train]
         sw_test_cats = [r.get(cat_key, r["category"]) for r in sw_test]
 
@@ -129,6 +135,7 @@ def run_benchmark(t5_data, sw_data, cat_key, seed, n=8):
             sw_train_cats, [r["expert_id"] for r in sw_train],
             sw_test_cats, [r["expert_id"] for r in sw_test], n)
 
+        has_all_layer = "all_layer_probs" in sw_train[0]
         if has_all_layer:
             sw_train_p = torch.stack([r["all_layer_probs"] for r in sw_train]).numpy().astype("float32")
             sw_test_p = torch.stack([r["all_layer_probs"] for r in sw_test]).numpy().astype("float32")
@@ -139,107 +146,78 @@ def run_benchmark(t5_data, sw_data, cat_key, seed, n=8):
             results["switch_all_layer_pca_8d"] = eval_clustering(
                 sw_train_cats, sw_pca8.transform(sw_train_p), sw_test_cats, sw_pca8.transform(sw_test_p), n)
 
-    results["_test_cats"] = test_cats
-    return results
+    return results, test_cats
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-FEATURE_ORDER = ["random", "majority", "word_identity", "switch_hard",
-                 "t5_pca_8d", "switch_all_layer_pca_8d", "t5_pca_32d",
-                 "t5_768d", "switch_all_layer_48d"]
-DIM_MAP = {"random": "-", "majority": "-", "word_identity": "-",
-           "switch_hard": "8", "t5_pca_8d": "8", "switch_all_layer_pca_8d": "8",
-           "t5_pca_32d": "32", "switch_all_layer_48d": "48", "t5_768d": "768"}
-
 def main():
+    # Load data
     all_files = glob.glob("artifacts/**/aligned_token_table_part*.pt", recursive=True)
     t5_data = []
-    for file in all_files:
-        t5_data.extend(torch.load(file))
-    print(f"Loaded {len(t5_data)} T5 aligned tokens.")
+    for f in all_files:
+        t5_data.extend(torch.load(f))
+    print(f"Loaded {len(t5_data)} T5 tokens")
 
     sw_data = None
-    for sw_path in glob.glob("artifacts/**/switch_token_table_8.pt", recursive=True):
-        sw_data = torch.load(sw_path)
+    for p in glob.glob("artifacts/**/switch_token_table_8.pt", recursive=True):
+        sw_data = torch.load(p)
         break
-    has_fine = "fine_category" in t5_data[0] if t5_data else False
-    print(f"Switch: {len(sw_data) if sw_data else 0} tokens, fine={has_fine}")
 
-    seeds = [42, 123, 7]
+    has_fine = "fine_category" in t5_data[0] if t5_data else False
+
+    # Split
+    t5_train, t5_test = split_data(t5_data)
+    sw_train, sw_test = split_data(sw_data) if sw_data else (None, None)
+    print(f"T5: {len(t5_train)} train, {len(t5_test)} test")
+    if sw_train:
+        print(f"Switch: {len(sw_train)} train, {len(sw_test)} test")
+
     output = {}
 
     for cat_key, label in [("category", "coarse")] + ([("fine_category", "fine")] if has_fine else []):
         print(f"\n{'#'*60}")
-        print(f"{label.upper()} | 3-seed robustness")
+        print(f"BENCHMARK | {label}")
         print(f"{'#'*60}")
 
-        # Collect results across seeds
-        all_runs = {}
-        for seed in seeds:
-            print(f"\n--- seed={seed} ---")
-            run = run_benchmark(t5_data, sw_data, cat_key, seed)
-            for key in FEATURE_ORDER:
-                if key not in run:
-                    continue
-                r = run[key]
-                print(f"  [{key}] Acc={r['accuracy']:.4f} F1={r['macro_f1']:.4f} ARI={r['ari']:.4f}")
-                all_runs.setdefault(key, []).append(r)
+        results, test_cats = run_benchmark(t5_train, t5_test, sw_train, sw_test, cat_key)
 
-        # Aggregate mean ± std
-        print(f"\n{'='*80}")
-        print(f"SUMMARY | {label} | mean +/- std over {len(seeds)} seeds")
-        print(f"{'='*80}")
-        print(f"{'Feature':<30} {'Dim':>4} {'Accuracy':>16} {'Macro-F1':>16} {'ARI':>16}")
-        print("-" * 90)
-
-        agg = {}
+        # Print summary
+        print(f"\n{'Feature':<30} {'Dim':>4} {'Accuracy':>10} {'Macro-F1':>10} {'ARI':>8}")
+        print("-" * 70)
         for key in FEATURE_ORDER:
-            if key not in all_runs:
+            if key not in results:
                 continue
-            runs = all_runs[key]
-            accs = [r["accuracy"] for r in runs]
-            f1s = [r["macro_f1"] for r in runs]
-            aris = [r["ari"] for r in runs]
-            dim = DIM_MAP.get(key, "?")
-            print(f"{key:<30} {dim:>4} "
-                  f"{np.mean(accs):.4f}+/-{np.std(accs):.4f} "
-                  f"{np.mean(f1s):.4f}+/-{np.std(f1s):.4f} "
-                  f"{np.mean(aris):.4f}+/-{np.std(aris):.4f}")
-            agg[key] = {
-                "dim": dim,
-                "accuracy_mean": np.mean(accs), "accuracy_std": np.std(accs),
-                "macro_f1_mean": np.mean(f1s), "macro_f1_std": np.std(f1s),
-                "ari_mean": np.mean(aris), "ari_std": np.std(aris),
-            }
-        output[label] = agg
+            r = results[key]
+            print(f"{key:<30} {DIM_MAP.get(key,'-'):>4} {r['accuracy']:>10.4f} {r['macro_f1']:>10.4f} {r['ari']:>8.4f}")
 
-        # Per-class F1 for seed=42 (primary seed)
-        print(f"\n--- Per-class F1 (seed=42) | {label} ---")
-        primary = run_benchmark(t5_data, sw_data, cat_key, seed=42)
-        test_cats = primary["_test_cats"]
+        # Per-class F1
+        print(f"\n--- Per-class F1 | {label} ---")
         for key in FEATURE_ORDER:
-            if key not in primary or "preds" not in primary[key]:
+            if key not in results or "preds" not in results[key]:
                 continue
-            preds = primary[key]["preds"]
             print(f"\n  [{key}]")
-            report = classification_report(test_cats, preds, zero_division=0)
-            for line in report.strip().split("\n"):
+            for line in classification_report(test_cats, results[key]["preds"], zero_division=0).strip().split("\n"):
                 print(f"    {line}")
 
+        # Clean preds before saving
+        for key in results:
+            results[key].pop("preds", None)
+        output[label] = results
+
     output["metadata"] = {
-        "protocol": "caption-level 80/20 split, 3 seeds",
-        "seeds": seeds,
+        "protocol": "COCO train 50k (fit) + validation 5k (eval)",
         "pca_fit": "train only", "kmeans_fit": "train only",
-        "mapping_fit": "train only", "evaluation": "test only",
+        "mapping_fit": "train only", "evaluation": "val only",
         "n_clusters": 8,
+        "t5_train": len(t5_train), "t5_test": len(t5_test),
     }
 
     with open("artifacts/eval_metrics.json", "w") as f:
         json.dump(output, f, indent=2)
-    print("\nSaved metrics to artifacts/eval_metrics.json")
+    print("\nSaved artifacts/eval_metrics.json")
 
 if __name__ == "__main__":
     main()

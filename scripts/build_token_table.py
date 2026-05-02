@@ -6,121 +6,100 @@ from transformers import T5Tokenizer, T5EncoderModel
 from src.utils.labeling import map_pos_to_category, map_pos_to_fine_category, normalize_t5_piece
 
 
-def main():
-    # load COCO training split and use the first caption from each example
-    dataset = load_dataset("phiyodr/coco2017", split="train[:10000]")
-    captions = []
-    for example in dataset:
-        if "captions" in example and len(example["captions"]) > 0:
-            captions.append(example["captions"][0].strip())
-
-    print(f"Loaded {len(captions)} captions from phiyodr/coco2017.")
-
-    # load models
-    tokenizer = T5Tokenizer.from_pretrained("t5-base")
-    model = T5EncoderModel.from_pretrained("t5-base")
-    model.eval()
-
-    nlp = spacy.load("en_core_web_sm")
-
+def process_split(captions, split_name, tokenizer, model, nlp, caption_id_offset=0):
     aligned_rows = []
-
     batch_size = 16
 
     for batch_start in range(0, len(captions), batch_size):
         batch_captions = captions[batch_start:batch_start + batch_size]
 
-        # tokenize captions with T5
-        inputs = tokenizer(
-            batch_captions,
-            return_tensors="pt",
-            padding=True,
-            truncation=True
-        )
-
+        inputs = tokenizer(batch_captions, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             outputs = model(**inputs)
 
-        hidden_states = outputs.last_hidden_state  # (B, seq_len, 512)
-        input_ids = inputs["input_ids"]  # (B, seq_len), 1 id for each token
-        attention_mask = inputs["attention_mask"]  # (B, seq_len), seq_len = length of longest tokenized caption in the specific batch
+        hidden_states = outputs.last_hidden_state
+        input_ids = inputs["input_ids"]
+        attention_mask = inputs["attention_mask"]
 
         for _id, caption in enumerate(batch_captions):
-            caption_id = batch_start + _id
+            caption_id = caption_id_offset + batch_start + _id
             doc = nlp(caption)
             spacy_words = [token.text for token in doc]
             spacy_categories = [map_pos_to_category(token) for token in doc]
             spacy_fine_categories = [map_pos_to_fine_category(token) for token in doc]
 
-            valid_len = attention_mask[_id].sum().item()  # <= seq_len
-            ids = input_ids[_id][:valid_len].tolist()  # (valid_len)
-            t5_tokens = tokenizer.convert_ids_to_tokens(ids)  # (valid_len)
-            t5_vectors = hidden_states[_id][:valid_len]  # (valid_len, 768)
-
-            # print("\n" + "=" * 80)
-            # print(f"Caption {caption_id}: {caption}")
-            # print("spaCy words:", spacy_words)
-            # print("T5 tokens:  ", t5_tokens)
+            valid_len = attention_mask[_id].sum().item()
+            ids = input_ids[_id][:valid_len].tolist()
+            t5_tokens = tokenizer.convert_ids_to_tokens(ids)
+            t5_vectors = hidden_states[_id][:valid_len]
 
             word_idx = 0
             piece_buffer = ""
 
             for sub_idx, sub_token in enumerate(t5_tokens):
                 piece = normalize_t5_piece(sub_token)
-
                 if piece == "":
                     continue
-
                 if word_idx >= len(spacy_words):
                     break
-
                 piece_buffer += piece
                 target_word = spacy_words[word_idx]
 
-                # compare in lowercase for robustness
                 if piece_buffer.lower() == target_word.lower():
-                    row = {
+                    aligned_rows.append({
                         "caption_id": caption_id,
-                        "caption": caption,
+                        "split": split_name,
                         "word": target_word,
                         "category": spacy_categories[word_idx],
                         "fine_category": spacy_fine_categories[word_idx],
-                        "subword_token": sub_token,
                         "vector": t5_vectors[sub_idx].detach().cpu().clone()
-                    }
-                    aligned_rows.append(row)
-
-                    # print(
-                    #     f"Aligned: word='{target_word}', "
-                    #     f"category='{spacy_categories[word_idx]}', "
-                    #     f"matched_subword='{sub_token}'"
-                    # )
-
+                    })
                     word_idx += 1
                     piece_buffer = ""
 
-            # print(f"Aligned {word_idx} / {len(spacy_words)} words.")
-        current_batch = batch_start // batch_size + 1
+        batch_num = batch_start // batch_size + 1
         total_batches = (len(captions) + batch_size - 1) // batch_size
-        if current_batch % 100 == 0 or current_batch == total_batches:
-            print(f"Processed batch {current_batch} / {total_batches}")
-    
-    print("\n" + "=" * 80)
-    print(f"Total aligned rows: {len(aligned_rows)}")
-    
-    chunk_size = 250000
-    total_chunks = (len(aligned_rows) + chunk_size - 1) // chunk_size
+        if batch_num % 200 == 0 or batch_num == total_batches:
+            print(f"  [{split_name}] batch {batch_num}/{total_batches}")
+
+    return aligned_rows
+
+
+def main():
+    # Load COCO train (50k) and validation (5k)
+    splits = [
+        ("train[:50000]", "train"),
+        ("validation", "val"),
+    ]
+
+    tokenizer = T5Tokenizer.from_pretrained("t5-base")
+    model = T5EncoderModel.from_pretrained("t5-base")
+    model.eval()
+    nlp = spacy.load("en_core_web_sm")
+
+    all_rows = []
+    offset = 0
+
+    for split_spec, split_name in splits:
+        dataset = load_dataset("phiyodr/coco2017", split=split_spec)
+        captions = [ex["captions"][0].strip() for ex in dataset if ex.get("captions")]
+        print(f"Loaded {len(captions)} captions for {split_name}")
+
+        rows = process_split(captions, split_name, tokenizer, model, nlp, caption_id_offset=offset)
+        all_rows.extend(rows)
+        offset += len(captions)
+        print(f"  {split_name}: {len(rows)} aligned tokens")
+
+    print(f"\nTotal: {len(all_rows)} aligned tokens")
 
     os.makedirs("artifacts", exist_ok=True)
-
+    chunk_size = 250000
+    total_chunks = (len(all_rows) + chunk_size - 1) // chunk_size
     for i in range(total_chunks):
-        start_idx = i * chunk_size
-        end_idx = min((i + 1) * chunk_size, len(aligned_rows))
-        chunk = aligned_rows[start_idx:end_idx]
-
-        save_path = f"artifacts/aligned_token_table_part{i+1}.pt"
-        torch.save(chunk, save_path)
-        print(f"Saved chunk {i+1}/{total_chunks} to {save_path}")
+        chunk = all_rows[i * chunk_size:(i + 1) * chunk_size]
+        path = f"artifacts/aligned_token_table_part{i+1}.pt"
+        torch.save(chunk, path)
+        print(f"Saved {path} ({len(chunk)} rows)")
 
 
 if __name__ == "__main__":
