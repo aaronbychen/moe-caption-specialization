@@ -12,7 +12,7 @@ import torch
 import numpy as np
 from collections import Counter, defaultdict
 from sklearn.cluster import KMeans
-from sklearn.metrics import adjusted_rand_score, v_measure_score
+from sklearn.metrics import adjusted_rand_score, v_measure_score, f1_score
 
 def compute_load_metrics(assignments, n_experts):
     counts = Counter(assignments)
@@ -56,28 +56,82 @@ def compute_entropy_per_category(categories, assignments):
     avg_entropy = sum(entropies.values()) / len(entropies) if entropies else 0.0
     return entropies, avg_entropy
 
+def majority_mapping_accuracy(categories, assignments, n_experts):
+    """Map each expert/cluster to its dominant category, then compute accuracy + macro-F1."""
+    expert_cats = defaultdict(list)
+    for cat, assign in zip(categories, assignments):
+        expert_cats[assign].append(cat)
+
+    # build majority mapping
+    mapping = {}
+    for eid in range(n_experts):
+        tokens = expert_cats.get(eid, [])
+        if tokens:
+            mapping[eid] = Counter(tokens).most_common(1)[0][0]
+        else:
+            mapping[eid] = None
+
+    # predict using mapping
+    preds = [mapping.get(a) for a in assignments]
+    correct = sum(1 for p, c in zip(preds, categories) if p == c)
+    accuracy = correct / len(categories) if categories else 0.0
+    macro_f1 = f1_score(categories, preds, average="macro", zero_division=0)
+
+    return accuracy, macro_f1, mapping
+
+def compute_baselines(categories):
+    """Random and majority baselines."""
+    counts = Counter(categories)
+    total = len(categories)
+    # majority baseline: always predict the most common class
+    majority_class = counts.most_common(1)[0][0]
+    majority_acc = counts[majority_class] / total
+    # majority F1
+    majority_preds = [majority_class] * total
+    majority_f1 = f1_score(categories, majority_preds, average="macro", zero_division=0)
+    # random baseline: expected accuracy = sum(p_i^2) for uniform expert assignment
+    # with majority mapping, random assignment gives ~largest class fraction
+    n_classes = len(counts)
+    random_acc = 1.0 / n_classes  # expected with uniform random
+    return {
+        "majority_accuracy": majority_acc,
+        "majority_f1": majority_f1,
+        "random_accuracy": random_acc,
+        "majority_class": majority_class,
+        "class_distribution": {k: v / total for k, v in counts.items()}
+    }
+
 def eval_model(label, categories, assignments, n):
     ari = adjusted_rand_score(categories, assignments)
     vmeasure = v_measure_score(categories, assignments)
     cat_entropy, avg_entropy = compute_entropy_per_category(categories, assignments)
     counts, load_cv = compute_load_metrics(assignments, n)
     purities, avg_purity = compute_purity(categories, assignments, n)
+    accuracy, macro_f1, mapping = majority_mapping_accuracy(categories, assignments, n)
 
     print(f"\n[{label}]")
+    print(f"  Accuracy: {accuracy:.4f} | Macro-F1: {macro_f1:.4f}")
     print(f"  ARI: {ari:.4f} | V-Meas: {vmeasure:.4f} | Entropy: {avg_entropy:.4f} | Purity: {avg_purity:.4f} | Load CV: {load_cv:.4f}")
+    print(f"  Mapping: {mapping}")
 
     return {
+        "accuracy": accuracy, "macro_f1": macro_f1,
         "ari": ari, "v_measure": vmeasure,
         "avg_entropy": avg_entropy, "load_cv": load_cv,
         "avg_purity": avg_purity,
-        "per_expert_purity": {str(k): v for k, v in purities.items()},
-        "expert_counts": counts
+        "expert_counts": counts,
+        "majority_mapping": {str(k): v for k, v in mapping.items()}
     }
 
 def run_eval(t5_data, t5_vectors, switch_data_map, cat_key, label_suffix):
-    """Run evaluation for a given category key (coarse or fine)."""
     t5_categories = [row[cat_key] for row in t5_data]
     results = {}
+
+    # baselines
+    baselines = compute_baselines(t5_categories)
+    print(f"\n  Baselines: majority_acc={baselines['majority_accuracy']:.4f} "
+          f"majority_f1={baselines['majority_f1']:.4f} random_acc={baselines['random_accuracy']:.4f}")
+    results["baselines"] = baselines
 
     for n in [4, 8, 16]:
         print(f"\n{'='*60}")
@@ -99,7 +153,7 @@ def run_eval(t5_data, t5_vectors, switch_data_map, cat_key, label_suffix):
     return results
 
 def main():
-    all_files = glob.glob("artifacts/aligned_token_table_part*.pt")
+    all_files = glob.glob("artifacts/**/aligned_token_table_part*.pt", recursive=True)
     t5_data = []
     for file in all_files:
         t5_data.extend(torch.load(file))
@@ -107,26 +161,21 @@ def main():
 
     print(f"Loaded {len(t5_data)} T5 aligned tokens.")
 
-    # check if fine_category is available
     has_fine = "fine_category" in t5_data[0] if t5_data else False
     print(f"Fine-grained categories available: {has_fine}")
 
-    # load all available switch data
     switch_data_map = {}
     for n in [4, 8, 16]:
-        sw_path = f"artifacts/switch_token_table_{n}.pt"
-        if os.path.exists(sw_path):
+        for sw_path in glob.glob(f"artifacts/**/switch_token_table_{n}.pt", recursive=True):
             switch_data_map[n] = torch.load(sw_path)
+            break
 
-    # coarse evaluation
     print("\n" + "#" * 60)
     print("COARSE CATEGORIES (5 classes)")
     print("#" * 60)
     coarse_results = run_eval(t5_data, t5_vectors, switch_data_map, "category", "coarse")
-
     output = {"coarse": coarse_results}
 
-    # fine evaluation
     if has_fine:
         print("\n" + "#" * 60)
         print("FINE-GRAINED CATEGORIES (9 classes)")
