@@ -33,6 +33,17 @@ Under a dimensionality-matched unsupervised comparison, Switch all-layer routing
 
 The word identity baseline (94.8%) shows that POS category is largely determined by lexical identity. The routing features capture substantial lexical-syntactic structure, though they do not exceed a direct lexical lookup.
 
+### 3-Seed Robustness (Coarse, mean±std)
+
+| Feature | Dim | Accuracy | Macro-F1 |
+|---|---|---|---|
+| Switch all-layer PCA-8D | 8 | 80.5%±0.6 | 0.691±0.055 |
+| T5 PCA-8D | 8 | 75.8%±0.8 | 0.608±0.006 |
+| Switch all-layer 48D | 48 | 81.5%±0.2 | 0.668±0.003 |
+| T5 768D KMeans baseline | 768 | 76.6%±0.8 | 0.640±0.040 |
+
+Results are consistent across 3 caption-level random splits (seeds 42, 123, 7).
+
 ## Setup
 
 ```bash
