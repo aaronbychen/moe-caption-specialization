@@ -15,18 +15,23 @@ We compare **Switch-base-8** router assignments against a **T5-base + K-Means** 
 
 ### Feature-Budget Fairness Benchmark (N=8, Coarse)
 
+All results evaluated on a held-out test set (caption-level 80/20 split). PCA, KMeans, and majority mapping are fit on train only.
+
 | Feature | Dim | Accuracy | Macro-F1 | ARI |
 |---|---|---|---|---|
 | Random baseline | - | 20.0% | - | - |
-| Majority baseline | - | 34.4% | 0.102 | - |
-| Switch hard expert ID | 8 | 71.9% | 0.576 | 0.343 |
-| T5 PCA-8D | 8 | 74.7% | 0.599 | 0.329 |
-| **Switch all-layer PCA-8D** | **8** | **78.6%** | **0.710** | **0.389** |
-| T5 PCA-32D | 32 | 75.2% | 0.615 | 0.341 |
-| T5 768D (upper bound) | 768 | 78.4% | 0.726 | 0.366 |
-| **Switch all-layer 48D** | **48** | **78.9%** | **0.750** | **0.406** |
+| Majority baseline | - | 35.4% | 0.105 | - |
+| Switch hard expert ID | 8 | 72.4% | 0.581 | 0.341 |
+| T5 PCA-8D | 8 | 75.6% | 0.610 | 0.343 |
+| **Switch all-layer PCA-8D** | **8** | **81.2%** | **0.769** | **0.376** |
+| T5 PCA-32D | 32 | 75.5% | 0.606 | 0.334 |
+| T5 768D KMeans baseline | 768 | 76.9% | 0.695 | 0.430 |
+| **Switch all-layer 48D** | **48** | **81.7%** | **0.670** | **0.430** |
+| Word identity baseline | - | 94.8% | 0.929 | 0.880 |
 
-At equal dimensionality (8D), Switch all-layer routing outperforms T5 PCA by +3.9% accuracy. With all 48 dimensions, Switch routing matches the T5 768D upper bound while using 16x fewer features. This suggests MoE routing provides a compact, linguistically meaningful signal.
+Under a dimensionality-matched unsupervised comparison, Switch all-layer routing features outperform T5 PCA at equal dimensionality (+5.6% accuracy at 8D). With all 48 dimensions, Switch routing outperforms the T5 768D KMeans baseline while using 16x fewer features.
+
+The word identity baseline (94.8%) shows that POS category is largely determined by lexical identity. The routing features capture substantial lexical-syntactic structure, though they do not exceed a direct lexical lookup.
 
 ## Setup
 
