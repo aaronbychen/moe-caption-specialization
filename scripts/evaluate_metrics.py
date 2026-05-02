@@ -65,8 +65,8 @@ def split_data(data):
 # Evaluation
 # ---------------------------------------------------------------------------
 
-def eval_clustering(train_cats, train_features, test_cats, test_features, n):
-    km = KMeans(n_clusters=n, random_state=42, n_init="auto")
+def eval_clustering(train_cats, train_features, test_cats, test_features, n, km_seed=42):
+    km = KMeans(n_clusters=n, random_state=km_seed, n_init="auto")
     km.fit(train_features)
     train_clusters = km.predict(train_features).tolist()
     test_clusters = km.predict(test_features).tolist()
@@ -92,10 +92,11 @@ def eval_expert_ids(train_cats, train_ids, test_cats, test_ids, n):
 
 FEATURE_ORDER = ["random", "majority", "word_identity", "switch_hard",
                  "t5_pca_8d", "switch_all_layer_pca_8d", "t5_pca_32d",
-                 "t5_768d", "switch_all_layer_48d"]
+                 "t5_pca_48d", "t5_768d", "switch_all_layer_48d"]
 DIM_MAP = {"random": "-", "majority": "-", "word_identity": "-",
            "switch_hard": "8", "t5_pca_8d": "8", "switch_all_layer_pca_8d": "8",
-           "t5_pca_32d": "32", "switch_all_layer_48d": "48", "t5_768d": "768"}
+           "t5_pca_32d": "32", "t5_pca_48d": "48",
+           "switch_all_layer_48d": "48", "t5_768d": "768"}
 
 def run_benchmark(t5_train, t5_test, sw_train, sw_test, cat_key, n=8):
     train_cats = [r[cat_key] for r in t5_train]
@@ -125,6 +126,10 @@ def run_benchmark(t5_train, t5_test, sw_train, sw_test, cat_key, n=8):
     # T5 PCA-32D
     pca32 = PCA(n_components=32, random_state=42).fit(train_vecs)
     results["t5_pca_32d"] = eval_clustering(train_cats, pca32.transform(train_vecs), test_cats, pca32.transform(test_vecs), n)
+
+    # T5 PCA-48D (exact dimension match with Switch all-layer)
+    pca48 = PCA(n_components=48, random_state=42).fit(train_vecs)
+    results["t5_pca_48d"] = eval_clustering(train_cats, pca48.transform(train_vecs), test_cats, pca48.transform(test_vecs), n)
 
     # Switch
     if sw_train:
@@ -206,6 +211,46 @@ def main():
         for key in results:
             results[key].pop("preds", None)
         output[label] = results
+
+    # --- KMeans seed robustness (coarse only) ---
+    print(f"\n{'#'*60}")
+    print("KMEANS SEED ROBUSTNESS | coarse")
+    print(f"{'#'*60}")
+
+    cat_key = "category"
+    train_cats = [r[cat_key] for r in t5_train]
+    test_cats = [r[cat_key] for r in t5_test]
+    train_vecs = torch.stack([r["vector"] for r in t5_train]).numpy().astype("float32")
+    test_vecs = torch.stack([r["vector"] for r in t5_test]).numpy().astype("float32")
+
+    km_seeds = [42, 123, 7]
+    seed_features = {"t5_768d": (train_vecs, test_vecs, train_cats, test_cats)}
+
+    # T5 PCA-48D
+    pca48 = PCA(n_components=48, random_state=42).fit(train_vecs)
+    seed_features["t5_pca_48d"] = (pca48.transform(train_vecs), pca48.transform(test_vecs), train_cats, test_cats)
+
+    if sw_train:
+        sw_train_cats = [r.get(cat_key, r["category"]) for r in sw_train]
+        sw_test_cats = [r.get(cat_key, r["category"]) for r in sw_test]
+        sw_train_p = torch.stack([r["all_layer_probs"] for r in sw_train]).numpy().astype("float32")
+        sw_test_p = torch.stack([r["all_layer_probs"] for r in sw_test]).numpy().astype("float32")
+        seed_features["switch_all_layer_48d"] = (sw_train_p, sw_test_p, sw_train_cats, sw_test_cats)
+
+    seed_results = {}
+    for fname, (tr_f, te_f, tr_c, te_c) in seed_features.items():
+        runs = [eval_clustering(tr_c, tr_f, te_c, te_f, 8, km_seed=s) for s in km_seeds]
+        accs = [r["accuracy"] for r in runs]
+        f1s = [r["macro_f1"] for r in runs]
+        aris = [r["ari"] for r in runs]
+        print(f"  {fname:<30} Acc={np.mean(accs):.4f}+/-{np.std(accs):.4f} "
+              f"F1={np.mean(f1s):.4f}+/-{np.std(f1s):.4f} ARI={np.mean(aris):.4f}+/-{np.std(aris):.4f}")
+        seed_results[fname] = {
+            "accuracy_mean": np.mean(accs), "accuracy_std": np.std(accs),
+            "macro_f1_mean": np.mean(f1s), "macro_f1_std": np.std(f1s),
+            "ari_mean": np.mean(aris), "ari_std": np.std(aris),
+        }
+    output["kmeans_seed_robustness"] = seed_results
 
     output["metadata"] = {
         "protocol": "COCO train 50k (fit) + validation 5k (eval)",

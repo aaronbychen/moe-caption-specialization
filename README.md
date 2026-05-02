@@ -15,7 +15,7 @@ We compare **Switch-base-8** router assignments against a **T5-base + K-Means** 
 
 ### Feature-Budget Fairness Benchmark (N=8, Coarse)
 
-All results evaluated on a held-out test set (caption-level 80/20 split). PCA, KMeans, and majority mapping are fit on train only.
+All results evaluated on the held-out COCO validation split (5k captions, ~56k tokens). PCA, KMeans, and majority mapping are fit on the 50k-caption COCO training subset only.
 
 | Feature | Dim | Accuracy | Macro-F1 | ARI |
 |---|---|---|---|---|
@@ -25,24 +25,24 @@ All results evaluated on a held-out test set (caption-level 80/20 split). PCA, K
 | T5 PCA-8D | 8 | 75.3% | 0.602 | 0.347 |
 | **Switch all-layer PCA-8D** | **8** | **80.7%** | **0.659** | **0.416** |
 | T5 PCA-32D | 32 | 75.6% | 0.607 | 0.349 |
+| T5 PCA-48D | 48 | 75.7% | 0.608 | 0.349 |
 | T5 768D KMeans baseline | 768 | 72.3% | 0.468 | 0.327 |
 | **Switch all-layer 48D** | **48** | **82.1%** | **0.801** | **0.441** |
 | Word identity baseline | - | 97.6% | 0.968 | 0.946 |
 
-Under a dimensionality-matched unsupervised comparison, Switch all-layer routing features outperform T5 PCA at equal dimensionality (+5.4% accuracy at 8D). Switch all-layer 48D now beats T5 768D KMeans on all metrics (accuracy, macro-F1, ARI) while using 16x fewer features. The macro-F1 gap between Switch PCA-8D (0.659) and Switch 48D (0.801) reflects the 48D model's ability to cover all 5 coarse classes including the minority attribute class, while PCA-8D misses it — illustrating why we report both metrics.
+Under a dimensionality-matched unsupervised comparison, Switch all-layer routing features outperform T5 PCA at equal dimensionality (+5.4% accuracy at 8D). Switch all-layer 48D outperforms all T5 KMeans/PCA baselines in our unsupervised clustering benchmark — including the exact dimension-matched T5 PCA-48D (+6.4% accuracy, +0.19 F1) — while using 16x fewer features than the T5 768D baseline. The macro-F1 gap between Switch PCA-8D (0.659) and Switch 48D (0.801) reflects the 48D model's ability to cover all 5 coarse classes including the minority attribute class, while PCA-8D misses it — illustrating why we report both metrics.
 
 The word identity baseline (97.6%) shows that POS category is largely determined by lexical identity. The routing features capture substantial lexical-syntactic structure, though they do not exceed a direct lexical lookup and should be interpreted as compact lexical-syntactic signals rather than evidence of deep semantic understanding.
 
-### 3-Seed Robustness (Coarse, mean±std)
+### 3-Seed KMeans Robustness (Coarse, mean±std)
 
 | Feature | Dim | Accuracy | Macro-F1 |
 |---|---|---|---|
-| Switch all-layer PCA-8D | 8 | 80.5%±0.6 | 0.691±0.055 |
-| T5 PCA-8D | 8 | 75.8%±0.8 | 0.608±0.006 |
-| Switch all-layer 48D | 48 | 81.5%±0.2 | 0.668±0.003 |
-| T5 768D KMeans baseline | 768 | 76.6%±0.8 | 0.640±0.040 |
+| Switch all-layer 48D | 48 | 80.0%±1.6 | 0.738±0.064 |
+| T5 PCA-48D | 48 | 76.7%±1.5 | 0.657±0.072 |
+| T5 768D KMeans baseline | 768 | 75.1%±2.0 | 0.597±0.097 |
 
-Results are consistent across 3 caption-level random splits (seeds 42, 123, 7).
+Results are stable across 3 KMeans random seeds (42, 123, 7).
 
 ### Fine-Grained Benchmark (N=8, 9 classes)
 
@@ -70,7 +70,7 @@ python -m spacy download en_core_web_sm
 ## Pipeline
 
 ```bash
-# 1. Build T5 token table (encodes 10k COCO captions, aligns subwords to spaCy POS labels)
+# 1. Build T5 token table (encodes 50k COCO train + 5k val captions, aligns subwords to spaCy POS labels)
 python -m scripts.build_token_table
 
 # 2. Build Switch token table (extracts all-layer expert routing for same captions)
