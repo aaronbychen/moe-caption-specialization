@@ -44,6 +44,21 @@ The word identity baseline (97.6%) shows that POS category is largely determined
 
 Results are consistent across 3 caption-level random splits (seeds 42, 123, 7).
 
+### Fine-Grained Benchmark (N=8, 9 classes)
+
+| Feature | Dim | Accuracy | Macro-F1 | ARI |
+|---|---|---|---|---|
+| Majority baseline | - | 32.0% | 0.054 | - |
+| Switch hard expert ID | 8 | 71.1% | 0.369 | 0.373 |
+| T5 PCA-8D | 8 | 72.9% | 0.329 | 0.361 |
+| **Switch all-layer PCA-8D** | **8** | **78.9%** | **0.373** | **0.456** |
+| T5 PCA-32D | 32 | 73.3% | 0.332 | 0.363 |
+| T5 768D KMeans baseline | 768 | 71.5% | 0.264 | 0.345 |
+| **Switch all-layer 48D** | **48** | **81.9%** | **0.458** | **0.486** |
+| Word identity baseline | - | 96.9% | 0.897 | 0.945 |
+
+The Switch advantage is larger at fine granularity: Switch 48D leads T5 768D KMeans by +10.4% accuracy and nearly doubles its macro-F1 (0.458 vs 0.264), suggesting that multi-layer routing trajectories capture finer-grained linguistic distinctions that single-layer KMeans clustering misses.
+
 ## Setup
 
 ```bash
